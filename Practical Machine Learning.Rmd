@@ -1,0 +1,153 @@
+---
+title: "Practical Machine Learning"
+author: "Yefu Wang"
+date: "November 24, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rpart)
+library(caret)
+library(rpart.plot)
+library(randomForest)
+```
+
+## Introduction
+
+This report is to solve the final project in the coursera course "practical machine learning". Two .csv documents are used in this report: pml-testing.csv, and pml-training.csv. The training document contains all the information from six user's movement, which includes five classes (A, B, C, D, and E). Then, we need to build and train a model from all the training information, and finally evaluate the model in the test data set. 
+
+## Data clean
+
+First of all, let's import all the data into R. And then, let's take a look what they look like.
+
+```{r, echo = TRUE}
+
+train.data <- read.csv("pml-training.csv", header = TRUE, stringsAsFactors = TRUE)
+test.data <- read.csv("pml-testing.csv", header = TRUE, stringsAsFactors = TRUE)
+cat(noquote("Here is the summary of training data: "))
+summary(train.data)
+cat(noquote("Here is the summary of test data: "))
+summary(test.data)
+
+```
+
+It seems that both data sets have 160 columns, and there are many columns in the test data set containing only NA values. So, we will have to select the columns containing no missing values.
+
+```{r, echo = TRUE}
+
+test.data.select <- test.data[, colSums(is.na(test.data)) < nrow(test.data)]
+cat(noquote("Here is the list of all columns with NO nas in test data set: "))
+colnames(test.data.select)
+
+cat(noquote("Check whether the names of all these features are the same as the names in train.data:"))
+cat("\n")
+colnames(test.data.select) %in% colnames(train.data)
+
+```
+
+We can see that these names are common in the train data set, except the last feature "problem_id", so we can select the all other features to build the model. Of course, we also need the predicted output "classe" in the model. Also, the first feature "X" is not that important in the model at all, so we will just abandon it. In addition, I don't think the features "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window" are really related to the "classe", so these features are dropped also.
+
+```{r, echo = TRUE}
+
+features.select <- colnames(test.data.select)
+features.delete <- c("X", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window", "problem_id")
+features.input <- features.select[!(features.select %in% features.delete)]
+train.data <- train.data[, c(features.input, "classe")]
+
+```
+
+So, we will use only two data sets in the following analysis: "train.data" and "test.data". 
+
+Let's start with simple decision tree first. 
+
+## Decision tree
+
+In this basic decision tree model, we can use "classe" as the output, and all other variables as "inputs". 
+
+```{r, echo=TRUE, fig.height=10,fig.width=10}
+
+set.seed(1217)
+# Get the random 30% of the rows in the train.data as crossing validation test, and 70% as train.train set.
+index.train <- sample(c(1:nrow(train.data)), 0.7 * nrow(train.data))
+train.train <- train.data[index.train, ]
+train.cv <- train.data[-index.train, ]
+tree <- rpart(classe ~ ., train.train, method = "class")
+cat(noquote("Here is the decision tree built with all features from train data:"))
+prp(tree, faclen = 0, cex = 0.8)
+
+```
+Then, let's take a look at how the model performs. 
+
+```{r, echo=TRUE}
+
+prediction.tree <- predict(tree, train.cv, type = "class")
+tree.performance <- confusionMatrix(prediction.tree, train.cv$classe)
+cat(noquote("Here is the performance of the decision tree model in the cross validation data set:"))
+cat("\n")
+tree.performance
+
+```
+
+So, we can see that the overall accuracy is 0.7545. 
+
+## Random forest
+
+In this section, the random forest model is used in the train.train data set. 
+
+```{r, echo = TRUE}
+
+rf <- randomForest(classe ~ ., data = train.train, type = "class")
+prediction.rf <- predict(rf, train.cv, type = "class")
+rf.performance <- confusionMatrix(prediction.rf, train.cv$classe)
+cat(noquote("Here is the performance of the random forest model in the cross validation data set:"))
+cat("\n")
+rf.performance
+plot(rf)
+```
+
+It seems that the random forest has a very good estimation already, the overall accuracy is 0.9949 in the cross validation data set. So, it should perform quite well in the test data also. 
+
+In this model, the number of trees is set as default (500). However, it might not be necessary to have those many trees in a forest, the plot shows that the error can be almost no-decreasing once the number of trees is smaller than 50. 
+
+However, let's take a look at the boosting method also.
+
+## Boosting method
+
+```{r, echo = TRUE}
+
+fitControl <- trainControl(method = "repeatedcv", number = 2, repeats = 1)
+
+boosting <- train(classe ~ ., data = train.train, method = "gbm",
+                 trControl = fitControl,
+                 verbose = FALSE)
+
+boosting.model <- boosting$finalModel
+prediction.boosting <- predict(boosting, train.cv)
+boosting.performance <- confusionMatrix(prediction.boosting, train.cv$classe)
+cat(noquote("The performance for the general boosting model in cross validation data set is:"))
+cat("\n")
+boosting.performance
+
+```
+
+The performance of the boosting method is 0.9616 overall accuracy. I think the accuracy would be much better if we can increase the number in the "trainControl"; however, it would take too much CPU time on my machine. So, I am unable to do that.
+
+Now, let's take a prediction of all values in test data set.
+
+## Test data set
+
+```{r, echo = TRUE}
+
+test.tree <- predict(tree, test.data, type = "class")
+test.rf <- predict(rf, test.data)
+test.boosting <- predict(boosting, test.data)
+
+cat(noquote("Here are the summary of all predicted results in test data set:"))
+test.tree
+test.rf
+test.boosting
+
+```
+
+So, let's use the results from random forest to estimate the classe in test data set.
